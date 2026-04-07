@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{ report_title }}</title>
+  <style>
+    @page cover { size: A4; margin: 0; @top-center { content: none; } @bottom-left { content: none; } @bottom-right { content: none; } }
+    @page body {
+      size: A4;
+      margin: 18mm 15mm 18mm 15mm;
+      @top-center { content: element(page-header); }
+      @bottom-left {
+        content: "CONFIDENZIALE - Tecnolife / " string(client_name);
+        font-family: Arial, Helvetica, sans-serif;
+        font-size: 8px;
+        color: #7385a6;
+      }
+      @bottom-right {
+        content: "Pagina " counter(page) " di " counter(pages);
+        font-family: Arial, Helvetica, sans-serif;
+        font-size: 8px;
+        color: #7385a6;
+      }
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; color: #2f3948; background: #efefef; font-family: Arial, Helvetica, sans-serif; }
+    body { background: #efefef; }
+    .client-string { position: absolute; left: -9999px; top: -9999px; string-set: client_name content(); }
+    .running-header { position: running(page-header); width: 180mm; margin: 0 auto; text-align: center; color: #2a4a7f; font-size: 10px; letter-spacing: .01em; padding-top: 2mm; }
+    .running-header .header-rule { width: 68mm; height: .35mm; background: #d6dee8; margin: 3mm auto 0 auto; }
+    .page { width: 210mm; margin: 0 auto 6mm auto; background: white; }
+    .cover-page { page: cover; min-height: 297mm; position: relative; overflow: hidden; padding: 24mm 18mm 24mm 18mm; background: linear-gradient(180deg, #ffffff 0%, #fbfcfe 100%); }
+    .cover-page .shape { position: absolute; border: .45mm solid rgba(201, 211, 224, 0.6); border-radius: 14mm; background: rgba(255,255,255,0.18); }
+    .shape.s1 { width: 38mm; height: 46mm; top: 28mm; left: 12mm; }
+    .shape.s2 { width: 68mm; height: 80mm; top: 14mm; left: 58mm; }
+    .shape.s3 { width: 98mm; height: 138mm; top: 20mm; left: 112mm; }
+    .shape.s4 { width: 56mm; height: 70mm; top: 108mm; left: 33mm; }
+    .shape.s5 { width: 58mm; height: 98mm; top: 148mm; left: 87mm; }
+    .shape.s6 { width: 76mm; height: 124mm; top: 152mm; left: 146mm; }
+    .cover-topline { position: absolute; top: 14mm; right: 16mm; text-align: right; color: #4f5e78; font-size: 11px; line-height: 1.5; }
+    .cover-topline .mini-rule { width: 14mm; height: .6mm; background: #5da0df; margin: 6mm 0 0 auto; }
+    .brand-lockup { position: relative; display: inline-flex; align-items: center; gap: 3mm; color: #1b365d; z-index: 1; }
+    .brand-mark { position: relative; width: 18mm; height: 18mm; }
+    .brand-mark span { position: absolute; display: block; background: linear-gradient(180deg, #5fb7f1 0%, #1f5eac 100%); }
+    .brand-mark span:nth-child(1) { width: 4mm; height: 4mm; left: 0; top: 4mm; }
+    .brand-mark span:nth-child(2) { width: 4mm; height: 4mm; left: 4.8mm; top: 0; }
+    .brand-mark span:nth-child(3) { width: 4mm; height: 4mm; left: 4.8mm; top: 8.8mm; }
+    .brand-mark span:nth-child(4) { width: 4mm; height: 4mm; left: 9.6mm; top: 4.4mm; }
+    .brand-mark span:nth-child(5) { width: 8mm; height: 12mm; left: 6.8mm; top: 5.2mm; border-radius: 0 0 1.2mm 1.2mm; }
+    .brand-wordmark strong { display: block; font-size: 15px; letter-spacing: .02em; }
+    .brand-wordmark small { display: block; font-size: 6px; letter-spacing: .42em; color: #5b7fae; text-transform: uppercase; padding-left: .4mm; }
+    .cover-body { position: relative; z-index: 1; height: 232mm; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8mm; text-align: center; }
+    .cover-line { width: 84mm; height: .8mm; background: #5f7ea6; margin: 1mm 0 4mm 0; }
+    .cover-title { font-size: 28px; line-height: 1.2; color: #1b365d; font-weight: 700; margin: 0; max-width: 152mm; }
+    .cover-subtitle { font-size: 22px; color: #4e5b70; max-width: 150mm; }
+    .cover-date { font-size: 14px; color: #7385a6; margin-top: 5mm; }
+    .confidential-box { width: 140mm; border: 1.2px solid #ea4335; text-align: center; padding: 4mm 0; color: #ea4335; font-size: 14px; font-weight: 700; letter-spacing: .25em; margin-top: 2mm; text-transform: uppercase; }
+    .cover-bottom { position: absolute; left: 14mm; right: 14mm; bottom: 12mm; display: flex; align-items: flex-end; justify-content: space-between; color: #4f5e78; font-size: 10px; z-index: 1; }
+    .cover-bottom .company { font-weight: 700; color: #2b4e84; font-size: 9px; line-height: 1.6; }
+    .seal-strip { display: flex; gap: 4mm; align-items: center; }
+    .seal { width: 18mm; height: 18mm; border-radius: 50%; border: .5mm solid #c7d0df; display: flex; align-items: center; justify-content: center; font-size: 7px; color: #4d5a73; text-transform: uppercase; background: #fbfcfe; }
+    .body-page, .appendix-page { page: body; break-before: page; padding-top: 4mm; padding-bottom: 2mm; }
+    .title-stack { display: flex; align-items: center; gap: 6mm; margin-top: 1mm; }
+    .section-kicker { width: 2mm; height: 22mm; background: #1b365d; }
+    .big-title { margin: 0; color: #1b365d; font-size: 30px; line-height: 1.15; }
+    .subsection-title { margin-top: 12mm; font-size: 23px; font-weight: 700; display: flex; align-items: center; gap: 4mm; color: #354052; }
+    .left-bar { display: inline-block; width: 1.5mm; height: 11mm; background: #5f7ea6; flex: 0 0 auto; margin-right: 5mm; vertical-align: middle; }
+    .left-bar.small { height: 9mm; margin-right: 4mm; }
+    .section-title { color: #354052; font-size: 24px; margin: 4mm 0 6mm 0; display: flex; align-items: center; font-weight: 700; }
+    .section-title.compact { font-size: 22px; margin-top: 8mm; }
+    .subhead { font-size: 16px; color: #394458; margin: 8mm 0 4mm 0; font-weight: 700; }
+    .rule { border: none; border-top: .45mm solid #d6dee8; margin: 8mm 0; }
+    .meta-table, .risk-table, .simple-table { width: 100%; border-collapse: collapse; }
+    .meta-table { margin-top: 5mm; font-size: 14px; }
+    .meta-table th, .meta-table td { padding: 4mm 3.5mm; border: 1px solid #cfd7e3; }
+    .meta-table tr:first-child th, .meta-table tr:first-child td { border-top: 6px solid #1b365d; }
+    .meta-table tr:nth-child(even) th, .meta-table tr:nth-child(even) td, .simple-table tr:nth-child(even) td, .simple-table tr:nth-child(even) th, .risk-table tr:nth-child(even) td { background: #eef2f6; }
+    .meta-table th, .simple-table th { text-align: left; font-weight: 700; }
+    .meta-table th { width: 25%; }
+    .toc { margin: 3mm 0 0 7mm; padding: 0 0 0 4mm; }
+    .toc li { display: flex; justify-content: space-between; gap: 8mm; padding-right: 4mm; margin-bottom: 2.5mm; font-size: 14px; line-height: 1.38; }
+    .toc a { color: #2f3948; text-decoration: none; }
+    .toc em { white-space: nowrap; color: #7385a6; font-style: normal; font-size: 12px; }
+    .summary-grid { display: grid; grid-template-columns: 1.15fr .85fr; gap: 8mm; margin-top: 4mm; }
+    .rating-box { border: 1.2px solid #1b365d; padding: 7mm 8mm; margin: 6mm 0; width: 100%; }
+    .rating-label { font-size: 25px; font-weight: 700; color: #1f2d3c; margin-bottom: 3mm; }
+    .rating-quote { font-size: 15px; line-height: 1.45; }
+    .kpi-strip { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4mm; margin: 6mm 0 4mm 0; }
+    .kpi-card { border: 1px solid #cfd7e3; background: #f7f9fc; padding: 4mm; min-height: 24mm; }
+    .kpi-card strong { display: block; font-size: 20px; color: #1b365d; margin-top: 1mm; }
+    .simple-table th, .simple-table td, .risk-table th, .risk-table td { border: 1px solid #cfd7e3; padding: 2.8mm; vertical-align: top; line-height: 1.42; font-size: 12.2px; }
+    .risk-table th { background: #1b365d; color: white; text-align: left; font-weight: 700; }
+    .note-box, .callout { border-left: 3mm solid #5f7ea6; background: #eef4fb; padding: 4.5mm 5mm; margin: 4mm 0 5mm 0; font-size: 14px; line-height: 1.5; }
+    .callout.amber { border-left-color: #f0ad4e; background: #fff6e7; }
+    .figure-panel { border: 1px solid #cfd7e3; background: #fcfdff; padding: 4mm 4.5mm 3mm 4.5mm; margin: 4mm 0 6mm 0; break-inside: avoid; }
+    .figure-caption { margin-top: 2mm; font-size: 12px; color: #5a677f; }
+    .svg-wrap { width: 100%; }
+    .diagram-svg, .heatmap-svg, .bars-svg { width: 100%; height: auto; }
+    .diagram-svg .node-text, .bars-svg .bar-label, .bars-svg .bar-value, .heatmap-svg .marker-label, .heatmap-svg .axis-label, .heatmap-svg .axis-note, .heatmap-svg .quad-label, .diagram-svg .note-text, .diagram-svg .warn-text { font-family: Arial, Helvetica, sans-serif; font-size: 14px; fill: #364258; }
+    .diagram-svg .center-text { font-family: Arial, Helvetica, sans-serif; font-size: 18px; font-weight: 700; fill: #ffffff; }
+    .diagram-svg .center-subtext { font-family: Arial, Helvetica, sans-serif; font-size: 13px; fill: #dbe5f4; }
+    .diagram-svg .warn-text { fill: #8a4f5a; }
+    .heatmap-svg .heat-title, .bars-svg .heat-title { font-family: Arial, Helvetica, sans-serif; font-size: 22px; font-weight: 700; fill: #344055; }
+    .heatmap-svg .quad-label { font-size: 15px; font-weight: 700; fill: #4f5c72; }
+    .heatmap-svg .axis-label { font-size: 14px; fill: #4f5c72; }
+    .heatmap-svg .axis-note { font-size: 12px; fill: #76849b; }
+    .heatmap-svg .marker-label { font-size: 13px; font-weight: 700; fill: #2f3948; }
+    .bars-svg .bar-label { font-size: 14px; font-weight: 700; fill: #334056; }
+    .bars-svg .bar-value { font-size: 13px; fill: #58657a; }
+    .content-html h3 { font-size: 16px; color: #394458; margin: 7mm 0 3mm 0; font-weight: 700; }
+    .content-html h4 { font-size: 14px; color: #394458; margin: 6mm 0 2.5mm 0; font-weight: 700; }
+    .content-html p, .content-html li { font-size: 13.8px; line-height: 1.55; margin: 0 0 3.5mm 0; }
+    .content-html ul, .content-html ol { padding-left: 6mm; margin: 0 0 4mm 0; }
+    .content-html table { width: 100%; border-collapse: collapse; margin: 4mm 0; font-size: 12.2px; }
+    .content-html th, .content-html td { border: 1px solid #cfd7e3; padding: 2.8mm; vertical-align: top; line-height: 1.42; }
+    .content-html th { background: #1b365d; color: #fff; text-align: left; font-weight: 700; }
+    .content-html tr:nth-child(even) td { background: #eef2f6; }
+  </style>
+</head>
+<body data-client="{{ client_name }}">
+  <div class="client-string">{{ client_name }}</div>
+  <div class="running-header"><div class="header-title">TECNOLIFE | {{ report_title }}</div><div class="header-rule"></div></div>
+
+  <section class="page cover-page">
+    <div class="shape s1"></div><div class="shape s2"></div><div class="shape s3"></div><div class="shape s4"></div><div class="shape s5"></div><div class="shape s6"></div>
+    <div class="cover-topline"><div>info@tecnolife.com</div><div>www.tecnolife.com</div><div class="mini-rule"></div></div>
+    <div class="cover-body">
+      <div class="brand-lockup"><div class="brand-mark"><span></span><span></span><span></span><span></span><span></span></div><div class="brand-wordmark"><strong>TECNOLIFE</strong><small>Innovation Factory</small></div></div>
+      <div class="cover-line"></div>
+      <h1 class="cover-title">{{ report_title }}</h1>
+      <div class="cover-subtitle">{{ client_name }} / {{ project_name }}</div>
+      <div class="cover-date">{{ generated_at }}</div>
+      <div class="confidential-box">{{ classification }}</div>
+    </div>
+    <div class="cover-bottom">
+      <div><div class="cover-line" style="width:20mm;height:.6mm;margin:0 0 2mm 0;"></div><div class="company">TECNOLIFE IT CONSULTING S.R.L.<br/>Via del Serafico 200 - 00142 Roma (RM) · Tel. +39 06 6534735 · P.IVA e C.F. 11747341003</div></div>
+      <div class="seal-strip"><div class="seal">DNV</div><div class="seal">CQY</div></div>
+    </div>
+  </section>
+
+  <section class="page body-page">
+    <div class="title-stack"><div class="section-kicker"></div><h1 class="big-title">{{ report_title }}</h1></div>
+    <div class="subsection-title"><span class="left-bar small"></span>{{ analysis_target_path }}</div>
+    <table class="meta-table">
+      <tr><th>Data di emissione</th><td>{{ generated_at }}</td></tr>
+      <tr><th>Classificazione</th><td>{{ classification }}</td></tr>
+      <tr><th>Ambiente di analisi</th><td>{{ analysis_environment }}</td></tr>
+      <tr><th>Versione</th><td>1.0</td></tr>
+      <tr><th>Destinatari</th><td>{{ recipients_label }}</td></tr>
+    </table>
+    <hr class="rule" />
+    <h2 class="section-title compact"><span class="left-bar"></span>Indice</h2>
+    <ol class="toc">
+      {% for section in report_sections -%}
+      <li><span><a href="#{{ section.anchor }}">{{ section.title }}</a></span><em>collegamento</em></li>
+      {% endfor -%}
+      <li><span><a href="#appendice-a-legenda">APPENDICE A. LEGENDA</a></span><em>collegamento</em></li>
+      <li><span><a href="#appendice-b-evidence-manifest">APPENDICE B. EVIDENCE MANIFEST</a></span><em>collegamento</em></li>
+      <li><span><a href="#appendice-c-delivery-inventory">APPENDICE C. DELIVERY INVENTORY</a></span><em>collegamento</em></li>
+      <li><span><a href="#appendice-d-logica-di-rating-e-scoring">APPENDICE D. LOGICA DI RATING E SCORING</a></span><em>collegamento</em></li>
+      <li><span><a href="#appendice-e-liberatoria">APPENDICE E. LIBERATORIA</a></span><em>collegamento</em></li>
+    </ol>
+  </section>
+
+  {% for section in report_sections %}
+  <section class="page body-page report-section" id="{{ section.anchor }}">
+    <h2 class="section-title"><span class="left-bar"></span>{{ section.title }}</h2>
+    {% if loop.first %}
+    <div class="summary-grid">
+      <div>
+        <h3 class="subhead">Dashboard esecutiva</h3>
+        <ol>
+          {% for item in summary_highlights[:3] -%}
+          <li>{{ item }}</li>
+          {% endfor -%}
+        </ol>
+        <div class="rating-box">
+          <div class="rating-label">RATING: {{ overall_rating.grade }}{% if overall_rating.score %} ({{ '%.2f'|format(overall_rating.score) }}){% endif %}</div>
+          <div class="rating-quote">Rating calcolato sul peggiore final score materialmente rilevante emerso dal Risk Register allineato all'HLD.</div>
+        </div>
+      </div>
+      <div>
+        <h3 class="subhead">KPI sintetici</h3>
+        <div class="kpi-strip">
+          <div class="kpi-card">Tool completati<strong>{{ completed_tools }}</strong></div>
+          <div class="kpi-card">Tool in errore<strong>{{ failed_tools }}</strong></div>
+          <div class="kpi-card">Finding validate<strong>{{ overall_rating.validated }}</strong></div>
+          <div class="kpi-card">Finding candidate<strong>{{ overall_rating.candidate }}</strong></div>
+        </div>
+        <div class="callout amber"><strong>Nota:</strong> le finestre di remediation sono espresse solo in termini relativi e non contengono date puntuali.</div>
+      </div>
+    </div>
+    {% endif %}
+    {% if section.number == '3' %}
+    <div class="figure-panel">
+      <h3 class="subhead">3.1 Topologia logica del perimetro</h3>
+      <div class="svg-wrap">{{ topology_svg | safe }}</div>
+      <div class="figure-caption">Ricostruzione basata su path core, framework rilevati, cluster dei finding e metadati deterministicamente acquisiti.</div>
+    </div>
+    <div class="figure-panel">
+      <h3 class="subhead">3.2 Heatmap Rischi per componenti</h3>
+      <div class="svg-wrap">{{ heatmap_svg | safe }}</div>
+      <div class="figure-caption">Matrice di rischio ricavata da coverage delle evidenze, finding clusterizzati e revisione profonda del codice.</div>
+    </div>
+    {% elif section.number == '8' %}
+    <div class="figure-panel">
+      <h3 class="subhead">8.1 Distribuzione del perimetro core</h3>
+      <div class="svg-wrap">{{ language_svg | safe }}</div>
+      <div class="figure-caption">Conteggio LOC limitato al perimetro core effettivamente considerato per la revisione.</div>
+    </div>
+    {% endif %}
+    <div class="content-html">{{ section.html | safe }}</div>
+  </section>
+  {% endfor %}
+
+  <section class="page appendix-page" id="appendice-a-legenda">
+    <h2 class="section-title"><span class="left-bar"></span>APPENDICE A. LEGENDA</h2>
+    <table class="simple-table">
+      <tr><th>Termine</th><th>Definizione</th></tr>
+      {% for row in legend_rows -%}
+      <tr><td>{{ row.term }}</td><td>{{ row.definition }}</td></tr>
+      {% endfor -%}
+    </table>
+  </section>
+
+  <section class="page appendix-page" id="appendice-b-evidence-manifest">
+    <h2 class="section-title"><span class="left-bar"></span>APPENDICE B. EVIDENCE MANIFEST</h2>
+    <p>{{ evidence_manifest_intro }}</p>
+    <pre><code>{{ evidence_manifest_json }}</code></pre>
+  </section>
+
+  <section class="page appendix-page" id="appendice-c-delivery-inventory">
+    <h2 class="section-title"><span class="left-bar"></span>APPENDICE C. DELIVERY INVENTORY</h2>
+    <table class="risk-table">
+      <tr><th>Artefatto</th><th>Descrizione</th><th>Comando di verifica</th></tr>
+      {% for row in delivery_inventory_rows -%}
+      <tr><td>{{ row.artifact }}</td><td>{{ row.description }}</td><td><code>{{ row.verification }}</code></td></tr>
+      {% endfor -%}
+    </table>
+  </section>
+
+  <section class="page appendix-page" id="appendice-d-logica-di-rating-e-scoring">
+    <h2 class="section-title"><span class="left-bar"></span>APPENDICE D. LOGICA DI RATING E SCORING</h2>
+    <table class="risk-table">
+      <tr><th>Indicatore</th><th>Formula</th></tr>
+      {% for row in rating_logic_rows -%}
+      <tr><td>{{ row.label }}</td><td>{{ row.formula }}</td></tr>
+      {% endfor -%}
+    </table>
+  </section>
+
+  <section class="page appendix-page" id="appendice-e-liberatoria">
+    <h2 class="section-title"><span class="left-bar"></span>APPENDICE E. LIBERATORIA</h2>
+    <div class="note-box">{{ disclaimer_text }}</div>
+  </section>
+</body>
+</html>

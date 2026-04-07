@@ -1,0 +1,134 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+RUNTIME_ROOT="${XDG_RUNTIME_DIR:-/tmp}/niobe"
+mkdir -p "${RUNTIME_ROOT}"
+chmod 700 "${RUNTIME_ROOT}"
+cd "${ROOT_DIR}"
+
+gold=$'\033[38;5;179m'
+blue=$'\033[38;5;110m'
+green=$'\033[38;5;78m'
+red=$'\033[38;5;203m'
+reset=$'\033[0m'
+
+ENV_ENC="${1:-${ROOT_DIR}/ops/runtime/control-plane.env.enc}"
+ACTION="${2:-up}"
+RUNTIME_ENV="${RUNTIME_ROOT}/control-plane.env"
+
+cleanup() {
+  rm -f "${RUNTIME_ENV}"
+}
+trap cleanup EXIT
+
+require_cmd() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    printf '%s\n' "${red}missing command:${reset} $1" >&2
+    exit 1
+  fi
+}
+
+prompt_secret() {
+  local prompt="$1"
+  local value=""
+  read -r -s -p "${prompt}" value
+  printf '\n'
+  printf '%s' "${value}"
+}
+
+configure_docker_host() {
+  local uid
+  uid="$(id -u)"
+  if [[ -n "${DOCKER_HOST:-}" ]]; then
+    return
+  fi
+  if [[ -n "${XDG_RUNTIME_DIR:-}" ]] && [[ -S "${XDG_RUNTIME_DIR}/docker.sock" ]]; then
+    export DOCKER_HOST="unix://${XDG_RUNTIME_DIR}/docker.sock"
+    return
+  fi
+  if [[ -S "/run/user/${uid}/docker.sock" ]]; then
+    export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/${uid}}"
+    export DOCKER_HOST="unix:///run/user/${uid}/docker.sock"
+    return
+  fi
+  if [[ -S "${HOME}/.docker/run/docker.sock" ]]; then
+    export DOCKER_HOST="unix://${HOME}/.docker/run/docker.sock"
+  fi
+}
+
+assert_rootless_docker() {
+  local security=""
+  if [[ "$(uname -s)" != "Linux" ]]; then
+    return
+  fi
+  configure_docker_host
+  security="$(docker info --format '{{json .SecurityOptions}}' 2>/dev/null || true)"
+  if [[ -z "${security}" ]]; then
+    printf '%s\n' "${red}docker rootless socket not reachable${reset}" >&2
+    exit 69
+  fi
+  if [[ "${security}" != *rootless* ]]; then
+    printf '%s\n' "${red}docker daemon is not running in rootless mode${reset}" >&2
+    exit 70
+  fi
+}
+
+require_cmd docker
+require_cmd openssl
+assert_rootless_docker
+
+if [[ ! -f "${ENV_ENC}" ]]; then
+  printf '%s\n' "${red}encrypted env not found:${reset} ${ENV_ENC}" >&2
+  exit 64
+fi
+
+printf '%s\n' "${gold}    _   ___      __        ${reset}"
+printf '%s\n' "${gold}   / | / (_)__  / /  ___   ${reset}"
+printf '%s\n' "${gold}  /  |/ / / _ \\/ _ \\/ _ \\  ${reset}"
+printf '%s\n' "${gold} / /|  / /  __/_.__/\\___/  ${reset}"
+printf '%s\n' "${gold}/_/ |_/_/\\___/             ${reset}"
+printf '%s\n' "${blue}control plane stack launcher${reset}"
+
+if [[ -z "${NIOBE_ENV_CIPHER_PASSWORD:-}" ]]; then
+  NIOBE_ENV_CIPHER_PASSWORD="$(prompt_secret 'OpenSSL env passphrase: ')"
+fi
+
+if [[ -z "${NIOBE_ENV_CIPHER_PASSWORD}" ]]; then
+  printf '%s\n' "${red}missing passphrase${reset}" >&2
+  exit 64
+fi
+
+openssl enc -d -aes-256-cbc -pbkdf2 \
+  -in "${ENV_ENC}" \
+  -out "${RUNTIME_ENV}" \
+  -pass env:NIOBE_ENV_CIPHER_PASSWORD
+
+unset NIOBE_ENV_CIPHER_PASSWORD
+
+printf '%s\n' "${green}env decrypted in ram:${reset} ${RUNTIME_ENV}"
+if [[ -n "${DOCKER_HOST:-}" ]]; then
+  printf '%s\n' "${green}docker host:${reset} ${DOCKER_HOST}"
+fi
+
+case "${ACTION}" in
+  up)
+    docker compose --env-file "${RUNTIME_ENV}" up -d
+    ;;
+  down)
+    docker compose --env-file "${RUNTIME_ENV}" down
+    ;;
+  restart)
+    docker compose --env-file "${RUNTIME_ENV}" down
+    docker compose --env-file "${RUNTIME_ENV}" up -d
+    ;;
+  ps)
+    docker compose --env-file "${RUNTIME_ENV}" ps
+    ;;
+  *)
+    printf '%s\n' "${red}unsupported action:${reset} ${ACTION}" >&2
+    exit 64
+    ;;
+esac
+
+printf '%s\n' "${green}compose action completed:${reset} ${ACTION}"

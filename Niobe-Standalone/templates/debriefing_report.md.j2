@@ -1,0 +1,76 @@
+# {{ report_title }}
+
+**Tecnolife**
+
+| Campo | Valore |
+| --- | --- |
+| Data di emissione | {{ generated_at }} |
+| Classificazione | {{ classification }} |
+| Ambiente di analisi | {{ analysis_environment }} |
+| Versione | 1.0 |
+| Destinatari | {{ recipients_label }} |
+
+## Indice
+
+{% for section in report_sections -%}
+- [{{ section.title }}](#{{ section.anchor }})
+{% endfor -%}
+- [APPENDICE A. LEGENDA](#appendice-a-legenda)
+- [APPENDICE B. EVIDENCE MANIFEST](#appendice-b-evidence-manifest)
+- [APPENDICE C. DELIVERY INVENTORY](#appendice-c-delivery-inventory)
+- [APPENDICE D. LOGICA DI RATING E SCORING](#appendice-d-logica-di-rating-e-scoring)
+- [APPENDICE E. LIBERATORIA](#appendice-e-liberatoria)
+
+{{ llm_report_body }}
+
+## APPENDICE A. LEGENDA
+
+| Termine | Definizione |
+| --- | --- |
+{% for row in legend_rows -%}
+| {{ row.term }} | {{ row.definition }} |
+{% endfor %}
+
+## APPENDICE B. EVIDENCE MANIFEST
+
+{{ evidence_manifest_intro }}
+
+```json
+{{ evidence_manifest_json }}
+```
+
+## APPENDICE C. DELIVERY INVENTORY
+
+| Artefatto | Descrizione | Verifica |
+| --- | --- | --- |
+{% for row in delivery_inventory_rows -%}
+| {{ row.artifact }} | {{ row.description }} | `{{ row.verification }}` |
+{% endfor %}
+
+## APPENDICE D. LOGICA DI RATING E SCORING
+
+{{ rating_logic_intro }}
+
+| Dimensione | Definizione |
+| --- | --- |
+{% for row in rating_dimension_rows -%}
+| {{ row.label }} | {{ row.definition }} |
+{% endfor %}
+
+| Indicatore | Formula |
+| --- | --- |
+{% for row in rating_logic_rows -%}
+| {{ row.label }} | {{ row.formula }} |
+{% endfor %}
+
+| Grade | Significato |
+| --- | --- |
+{% for row in grade_meaning_rows -%}
+| {{ row.grade }} | {{ row.meaning }} |
+{% endfor %}
+
+{{ rating_logic_clauses }}
+
+## APPENDICE E. LIBERATORIA
+
+{{ disclaimer_text }}

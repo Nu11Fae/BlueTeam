@@ -1,0 +1,348 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+TARGET_USER="${1:-${SUDO_USER:-}}"
+REQUIRED_SUBIDS=65536
+EXPECTED_GPG_FPR="060A61C51B558A7F742B77AAC52FEB6B621E9F35"
+
+warn() {
+  printf '[WARN] %s\n' "$*" >&2
+}
+
+die() {
+  printf '[ERROR] %s\n' "$*" >&2
+  exit 1
+}
+
+require_root() {
+  if [[ "$(id -u)" -ne 0 ]]; then
+    die "root privileges are required"
+  fi
+}
+
+require_cmd() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    die "missing command: $1"
+  fi
+}
+
+validate_target_user() {
+  if [[ -z "${TARGET_USER}" ]]; then
+    die "usage: ${0##*/} <non-root-user>"
+  fi
+
+  if [[ "${TARGET_USER}" == "root" ]]; then
+    die "rootless Docker requires a non-root target user"
+  fi
+
+  if ! id "${TARGET_USER}" >/dev/null 2>&1; then
+    die "target user not found: ${TARGET_USER}"
+  fi
+}
+
+detect_os() {
+  [[ -f /etc/os-release ]] || die "/etc/os-release not found"
+
+  # shellcheck disable=SC1091
+  source /etc/os-release
+
+  OS_ID="${ID:-}"
+  OS_NAME="${NAME:-unknown}"
+  OS_VERSION_ID="${VERSION_ID:-unknown}"
+  OS_MAJOR="${OS_VERSION_ID%%.*}"
+
+  case "${OS_ID}" in
+    rhel)
+      case "${OS_MAJOR}" in
+        8|9|10) ;;
+        *) die "unsupported RHEL version: ${OS_VERSION_ID}" ;;
+      esac
+      REPO_FAMILY="rhel"
+      ;;
+    rocky)
+      case "${OS_MAJOR}" in
+        8|9|10) ;;
+        *) die "unsupported Rocky Linux version: ${OS_VERSION_ID}" ;;
+      esac
+      REPO_FAMILY="rhel"
+      ;;
+    centos)
+      if ! grep -qi 'stream' /etc/os-release; then
+        die "unsupported CentOS variant: only CentOS Stream 9/10 are supported"
+      fi
+      case "${OS_MAJOR}" in
+        9|10) ;;
+        *) die "unsupported CentOS Stream version: ${OS_VERSION_ID}" ;;
+      esac
+      REPO_FAMILY="centos"
+      ;;
+    *)
+      die "unsupported distribution: ${OS_ID}"
+      ;;
+  esac
+
+  REPO_URL="https://download.docker.com/linux/${REPO_FAMILY}/docker-ce.repo"
+  GPG_URL="https://download.docker.com/linux/${REPO_FAMILY}/gpg"
+}
+
+init_target_context() {
+  TARGET_UID="$(id -u "${TARGET_USER}")"
+  TARGET_GID="$(id -g "${TARGET_USER}")"
+  TARGET_HOME="$(getent passwd "${TARGET_USER}" | cut -d: -f6)"
+  RUNTIME_DIR="/run/user/${TARGET_UID}"
+  DOCKER_SOCKET="${RUNTIME_DIR}/docker.sock"
+  PROFILE_SNIPPET="/etc/profile.d/niobe-docker-rootless.sh"
+
+  [[ -n "${TARGET_HOME}" ]] || die "could not resolve home directory for ${TARGET_USER}"
+}
+
+run_as_target_user() {
+  local command="$1"
+
+  su - "${TARGET_USER}" -s /bin/bash -c "
+    export XDG_RUNTIME_DIR='${RUNTIME_DIR}'
+    export DOCKER_HOST='unix://${DOCKER_SOCKET}'
+    if [ -S '${RUNTIME_DIR}/bus' ]; then
+      export DBUS_SESSION_BUS_ADDRESS='unix:path=${RUNTIME_DIR}/bus'
+    fi
+    ${command}
+  "
+}
+
+remove_conflicting_packages() {
+  dnf -y remove \
+    docker \
+    docker-client \
+    docker-client-latest \
+    docker-common \
+    docker-latest \
+    docker-latest-logrotate \
+    docker-logrotate \
+    docker-engine \
+    podman \
+    runc || true
+}
+
+install_prereqs() {
+  dnf -y install \
+    ca-certificates \
+    curl \
+    dbus-daemon \
+    dnf-plugins-core \
+    fuse-overlayfs \
+    gnupg2 \
+    iptables \
+    shadow-utils \
+    slirp4netns
+}
+
+verify_rootless_binaries() {
+  command -v newuidmap >/dev/null 2>&1 || die "newuidmap not found after prerequisite install"
+  command -v newgidmap >/dev/null 2>&1 || die "newgidmap not found after prerequisite install"
+}
+
+setup_repo() {
+  dnf config-manager --add-repo "${REPO_URL}"
+
+  if [[ "${OS_ID}" == "centos" ]]; then
+    dnf config-manager --set-enabled centos-extras >/dev/null 2>&1 \
+      || dnf config-manager --set-enabled extras >/dev/null 2>&1 \
+      || warn "could not explicitly enable centos-extras/extras; continuing"
+  fi
+}
+
+import_gpg_key() {
+  local key_file
+  local actual_fpr
+
+  key_file="$(mktemp)"
+  trap 'rm -f "${key_file}"' RETURN
+
+  curl -fsSL "${GPG_URL}" -o "${key_file}"
+
+  actual_fpr="$(gpg --show-keys --with-colons "${key_file}" 2>/dev/null | awk -F: '/^fpr:/ {print toupper($10); exit}')"
+
+  if [[ -z "${actual_fpr}" ]]; then
+    die "could not read Docker GPG fingerprint"
+  fi
+
+  if [[ "${actual_fpr}" != "${EXPECTED_GPG_FPR}" ]]; then
+    die "unexpected Docker GPG fingerprint: ${actual_fpr}"
+  fi
+
+  rpm --import "${key_file}"
+
+  rm -f "${key_file}"
+  trap - RETURN
+}
+
+install_docker_packages() {
+  dnf -y install \
+    docker-ce \
+    docker-ce-cli \
+    containerd.io \
+    docker-buildx-plugin \
+    docker-compose-plugin \
+    docker-ce-rootless-extras
+}
+
+current_subid_total() {
+  local file="$1"
+  if [[ ! -f "${file}" ]]; then
+    echo 0
+    return
+  fi
+
+  awk -F: -v u="${TARGET_USER}" '
+    $1 == u && $3 ~ /^[0-9]+$/ { sum += $3 }
+    END { print sum + 0 }
+  ' "${file}"
+}
+
+next_subid_start() {
+  local file="$1"
+
+  if [[ ! -s "${file}" ]]; then
+    echo 100000
+    return
+  fi
+
+  awk -F: '
+    BEGIN { max = 99999 }
+    $2 ~ /^[0-9]+$/ && $3 ~ /^[0-9]+$/ {
+      end = $2 + $3 - 1
+      if (end > max) {
+        max = end
+      }
+    }
+    END { print max + 1 }
+  ' "${file}"
+}
+
+ensure_subid_file() {
+  local file="$1"
+  local flag="$2"
+  local current_total
+  local start
+  local end
+
+  touch "${file}"
+
+  current_total="$(current_subid_total "${file}")"
+  if (( current_total >= REQUIRED_SUBIDS )); then
+    return
+  fi
+
+  start="$(next_subid_start "${file}")"
+  end="$(( start + REQUIRED_SUBIDS - 1 ))"
+
+  usermod "${flag}" "${start}-${end}" "${TARGET_USER}"
+}
+
+ensure_subid_ranges() {
+  ensure_subid_file /etc/subuid --add-subuids
+  ensure_subid_file /etc/subgid --add-subgids
+}
+
+disable_rootful_daemon() {
+  systemctl disable --now docker.service docker.socket containerd.service >/dev/null 2>&1 || true
+  systemctl mask docker.service docker.socket >/dev/null 2>&1 || true
+  rm -f /var/run/docker.sock
+}
+
+ensure_user_manager() {
+  loginctl enable-linger "${TARGET_USER}"
+  systemctl start "user@${TARGET_UID}.service" >/dev/null 2>&1 || true
+  install -d -m 0700 -o "${TARGET_USER}" -g "${TARGET_GID}" "${RUNTIME_DIR}"
+}
+
+resolve_rootless_setuptool() {
+  if command -v dockerd-rootless-setuptool.sh >/dev/null 2>&1; then
+    command -v dockerd-rootless-setuptool.sh
+    return
+  fi
+
+  local candidate
+  for candidate in \
+    /usr/bin/dockerd-rootless-setuptool.sh \
+    /usr/libexec/docker/dockerd-rootless-setuptool.sh \
+    /usr/share/docker-ce/rootless/dockerd-rootless-setuptool.sh \
+    /usr/share/docker.io/contrib/dockerd-rootless-setuptool.sh
+  do
+    if [[ -x "${candidate}" ]]; then
+      printf '%s\n' "${candidate}"
+      return
+    fi
+  done
+
+  die "dockerd-rootless-setuptool.sh not found after package installation"
+}
+
+install_rootless_daemon() {
+  local setup_tool
+
+  setup_tool="$(resolve_rootless_setuptool)"
+
+  run_as_target_user "\"${setup_tool}\" install --force"
+  run_as_target_user "systemctl --user daemon-reload"
+  run_as_target_user "systemctl --user enable --now docker.service"
+}
+
+write_profile_snippet() {
+  cat > "${PROFILE_SNIPPET}" <<'EOF'
+if [ -z "${DOCKER_HOST:-}" ]; then
+  if [ -n "${XDG_RUNTIME_DIR:-}" ] && [ -S "${XDG_RUNTIME_DIR}/docker.sock" ]; then
+    export DOCKER_HOST="unix://${XDG_RUNTIME_DIR}/docker.sock"
+  elif [ -S "/run/user/$(id -u)/docker.sock" ]; then
+    export DOCKER_HOST="unix:///run/user/$(id -u)/docker.sock"
+  fi
+fi
+EOF
+  chmod 0644 "${PROFILE_SNIPPET}"
+}
+
+validate_install() {
+  run_as_target_user "docker info --format '{{json .SecurityOptions}}'" | grep -qi rootless \
+    || die "docker info does not report rootless mode"
+
+  run_as_target_user "docker compose version >/dev/null" \
+    || die "docker compose plugin validation failed"
+
+  printf 'docker rootless ready for %s on %s\n' "${TARGET_USER}" "${DOCKER_SOCKET}"
+}
+
+main() {
+  require_root
+  validate_target_user
+
+  require_cmd curl
+  require_cmd dnf
+  require_cmd gpg
+  require_cmd id
+  require_cmd awk
+  require_cmd getent
+  require_cmd grep
+  require_cmd install
+  require_cmd loginctl
+  require_cmd rpm
+  require_cmd su
+  require_cmd systemctl
+  require_cmd usermod
+
+  detect_os
+  init_target_context
+  remove_conflicting_packages
+  install_prereqs
+  verify_rootless_binaries
+  setup_repo
+  import_gpg_key
+  install_docker_packages
+  ensure_subid_ranges
+  disable_rootful_daemon
+  ensure_user_manager
+  install_rootless_daemon
+  write_profile_snippet
+  validate_install
+}
+
+main "$@"

@@ -1,0 +1,183 @@
+---
+- name: Bootstrap Digital Audit control plane
+  hosts: control_plane
+  become: true
+  vars:
+    ssh_hardened_port: 2222
+    load_balancer_ip: 127.0.0.1
+    app_root: /opt/niobe
+    control_plane_user: "{{ ansible_user | default(ansible_user_id) }}"
+    ssh_service_name: "{{ 'sshd' if ansible_os_family == 'RedHat' else 'ssh' }}"
+  tasks:
+    - name: Install base packages
+      package:
+        name:
+          - curl
+          - figlet
+          - fail2ban
+          - gnupg
+          - openssl
+          - rsync
+        state: present
+
+    - name: Install HTTP server on Debian
+      package:
+        name:
+          - apache2
+          - libapache2-mod-security2
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Install HTTP server on RedHat
+      package:
+        name:
+          - httpd
+          - mod_security
+        state: present
+      when: ansible_os_family == "RedHat"
+
+    - name: Install micro on Debian
+      package:
+        name: micro
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Install iproute utilities on Linux
+      package:
+        name: iproute2
+        state: present
+      when: ansible_os_family == "Debian"
+
+    - name: Refuse root SSH user for rootless Docker
+      fail:
+        msg: Rootless Docker requires a non-root SSH user for the control-plane host.
+      when: control_plane_user == "root"
+
+    - name: Resolve control-plane user UID
+      command: id -u {{ control_plane_user }}
+      register: control_plane_uid
+      changed_when: false
+
+    - name: Ensure application root exists
+      file:
+        path: "{{ app_root }}"
+        state: directory
+        mode: "0755"
+
+    - name: Push project tree to control plane host
+      synchronize:
+        src: ../../
+        dest: "{{ app_root }}/"
+        delete: false
+        rsync_opts:
+          - "--exclude=.git"
+          - "--exclude=reports"
+          - "--exclude=storage"
+          - "--exclude=__pycache__"
+
+    - name: Install Docker in rootless mode for the control-plane user
+      command: "{{ app_root }}/scripts/install-docker-rootless {{ control_plane_user }}"
+
+    - name: Verify rootless Docker security options
+      become_user: "{{ control_plane_user }}"
+      command:
+        argv:
+          - docker
+          - info
+          - --format
+          - "{{ '{{json .SecurityOptions}}' }}"
+      environment:
+        XDG_RUNTIME_DIR: "/run/user/{{ control_plane_uid.stdout }}"
+        DOCKER_HOST: "unix:///run/user/{{ control_plane_uid.stdout }}/docker.sock"
+      register: docker_security_options
+      changed_when: false
+
+    - name: Fail if Docker is not rootless
+      fail:
+        msg: Control-plane Docker daemon is not running in rootless mode.
+      when: "'rootless' not in docker_security_options.stdout"
+
+    - name: Write SSH hardening fragment
+      template:
+        src: sshd-hardening.conf.j2
+        dest: /etc/ssh/sshd_config.d/99-niobe.conf
+        mode: "0644"
+
+    - name: Enable Apache modules on Debian
+      shell: a2enmod headers proxy proxy_http rewrite security2 remoteip unique_id
+      when: ansible_os_family == "Debian"
+      changed_when: false
+
+    - name: Deploy Apache virtual host on Debian
+      template:
+        src: apache-control-plane.conf.j2
+        dest: /etc/apache2/sites-available/digital-audit.conf
+        mode: "0644"
+      when: ansible_os_family == "Debian"
+
+    - name: Enable Apache virtual host on Debian
+      shell: a2dissite 000-default && a2ensite digital-audit
+      when: ansible_os_family == "Debian"
+      changed_when: false
+
+    - name: Deploy Apache virtual host on RedHat
+      template:
+        src: apache-control-plane.conf.j2
+        dest: /etc/httpd/conf.d/digital-audit.conf
+        mode: "0644"
+      when: ansible_os_family == "RedHat"
+
+    - name: Restart control-plane services
+      service:
+        name: "{{ item }}"
+        state: restarted
+        enabled: true
+      loop:
+        - "{{ 'apache2' if ansible_os_family == 'Debian' else 'httpd' }}"
+        - fail2ban
+        - "{{ ssh_service_name }}"
+      ignore_errors: true
+
+    - name: Configure UFW on Debian
+      when: ansible_os_family == "Debian"
+      block:
+        - community.general.ufw:
+            rule: allow
+            port: "{{ ssh_hardened_port }}"
+            proto: tcp
+        - community.general.ufw:
+            rule: allow
+            port: "80"
+            proto: tcp
+            src: "{{ load_balancer_ip }}"
+        - community.general.ufw:
+            rule: deny
+            port: "80"
+            proto: tcp
+        - community.general.ufw:
+            state: enabled
+
+    - name: Configure firewalld on RedHat
+      when: ansible_os_family == "RedHat"
+      block:
+        - ansible.posix.firewalld:
+            port: "{{ ssh_hardened_port }}/tcp"
+            permanent: true
+            state: enabled
+            immediate: true
+        - ansible.posix.firewalld:
+            rich_rule: rule family="ipv4" source address="{{ load_balancer_ip }}" port port="80" protocol="tcp" accept
+            permanent: true
+            state: enabled
+            immediate: true
+
+    - name: Start control plane stack with runtime decrypted env
+      shell: bash scripts/run-control-plane-stack ops/runtime/control-plane.env.enc up
+      become_user: "{{ control_plane_user }}"
+      args:
+        chdir: "{{ app_root }}"
+      environment:
+        XDG_RUNTIME_DIR: "/run/user/{{ control_plane_uid.stdout }}"
+        DOCKER_HOST: "unix:///run/user/{{ control_plane_uid.stdout }}/docker.sock"
+        NIOBE_ENV_CIPHER_PASSWORD: "{{ lookup('env', 'NIOBE_ENV_CIPHER_PASSWORD') }}"
+      no_log: true
